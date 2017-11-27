@@ -1,16 +1,23 @@
 ﻿using System;
+using System.Security.Claims;
+using System.Threading.Tasks;
 using Microsoft.AspNet.Identity;
 using Microsoft.AspNet.Identity.Owin;
 using Microsoft.Owin;
 using Microsoft.Owin.Security.Cookies;
 using Microsoft.Owin.Security.Google;
 using Owin;
+using Google.Apis.Auth.OAuth2.Responses;
 using ToDoEvents.Models;
+using Calendar.ASP.NET.MVC5;
+using Google.Apis.Util.Store;
+using Google.Apis.Auth.OAuth2;
 
 namespace ToDoEvents
 {
     public partial class Startup
     {
+        private IDataStore dataStore = new FileDataStore(GoogleWebAuthorizationBroker.Folder);
         // For more information on configuring authentication, please visit https://go.microsoft.com/fwlink/?LinkId=301864
         public void ConfigureAuth(IAppBuilder app)
         {
@@ -45,24 +52,39 @@ namespace ToDoEvents
             // This is similar to the RememberMe option when you log in.
             app.UseTwoFactorRememberBrowserCookie(DefaultAuthenticationTypes.TwoFactorRememberBrowserCookie);
 
-            // Uncomment the following lines to enable logging in with third party login providers
-            //app.UseMicrosoftAccountAuthentication(
-            //    clientId: "",
-            //    clientSecret: "");
+            // ***
+            // Enables logging in with the Google login provider.
+            var google = new GoogleOAuth2AuthenticationOptions()
+            {
+                AccessType = "offline",     // Request a refresh token.
+                ClientId = MyClientSecrets.ClientId,
+                ClientSecret = MyClientSecrets.ClientSecret,
+                Provider = new GoogleOAuth2AuthenticationProvider()
+                {
+                    OnAuthenticated = async context =>
+                    {
+                        var userId = context.Id;
+                        context.Identity.AddClaim(new Claim(MyClaimTypes.GoogleUserId, userId));
 
-            //app.UseTwitterAuthentication(
-            //   consumerKey: "",
-            //   consumerSecret: "");
+                        var tokenResponse = new TokenResponse()
+                        {
+                            AccessToken = context.AccessToken,
+                            RefreshToken = context.RefreshToken,
+                            ExpiresInSeconds = (long)context.ExpiresIn.Value.TotalSeconds,
+                            Issued = DateTime.Now,
+                        };
 
-            //app.UseFacebookAuthentication(
-            //   appId: "",
-            //   appSecret: "");
+                        await dataStore.StoreAsync(userId, tokenResponse);
+                    },
+                },
+            };
 
-            //app.UseGoogleAuthentication(new GoogleOAuth2AuthenticationOptions()
-            //{
-            //    ClientId = "",
-            //    ClientSecret = ""
-            //});
+            foreach (var scope in MyRequestedScopes.Scopes)
+            {
+                google.Scope.Add(scope);
+            }
+
+            app.UseGoogleAuthentication(google);
         }
     }
 }
